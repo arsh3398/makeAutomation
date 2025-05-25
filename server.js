@@ -79,22 +79,35 @@ function detectImageFormat(buffer) {
     return null; // Unknown format, let Sharp auto-detect
 }
 
-// Helper function to estimate text width (rough approximation)
+// Helper function to estimate text width (more accurate approximation)
 function estimateTextWidth(text, fontSize, fontFamily = 'Arial') {
-    // Rough character width multipliers for common fonts
+    // More accurate character width multipliers for common fonts
     const fontMultipliers = {
-        'Arial': 0.6,
-        'Helvetica': 0.6,
-        'Times': 0.55,
-        'Georgia': 0.55,
-        'Courier': 0.8,
-        'Verdana': 0.7,
-        'Impact': 0.65,
-        'Comic Sans MS': 0.65
+        'Arial': 0.52,
+        'Helvetica': 0.52,
+        'Times': 0.48,
+        'Georgia': 0.51,
+        'Courier': 0.6,
+        'Verdana': 0.58,
+        'Impact': 0.45,
+        'Comic Sans MS': 0.55,
+        'Roboto': 0.51,
+        'Open Sans': 0.50
     };
     
-    const multiplier = fontMultipliers[fontFamily] || 0.6;
-    return text.length * fontSize * multiplier;
+    const multiplier = fontMultipliers[fontFamily] || 0.52;
+    
+    // Account for different character widths
+    let adjustedLength = 0;
+    for (let char of text) {
+        if (char === ' ') adjustedLength += 0.3;
+        else if ('iIl1'.includes(char)) adjustedLength += 0.4;
+        else if ('mwMW'.includes(char)) adjustedLength += 1.2;
+        else if ('fjtJ'.includes(char)) adjustedLength += 0.5;
+        else adjustedLength += 1;
+    }
+    
+    return adjustedLength * fontSize * multiplier;
 }
 
 // Helper function to wrap text to fit within image width
