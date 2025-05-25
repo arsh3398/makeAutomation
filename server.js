@@ -465,15 +465,16 @@ app.post('/api/overlay', upload.single('image'), async (req, res) => {
             }]);
 
         // Apply the appropriate format
-        sharpInstance = applySharpFormat(sharpInstance, finalFormat, metadata);
+        sharpInstance = sharpInstance.jpeg({ quality: 90 });
         const outputBuffer = await sharpInstance.toBuffer();
 
         // Set response headers
-        res.set({
-            'Content-Type': `image/${getSharpFormat(finalFormat, metadata)}`,
-            'Content-Length': outputBuffer.length,
-            'Content-Disposition': `attachment; filename="image-with-overlay.${getSharpFormat(finalFormat, metadata)}"`
-        });
+res.set({
+  'Content-Type': 'image/jpeg',
+  'Content-Length': outputBuffer.length,
+  'Content-Disposition': 'attachment; filename="image-with-overlay.jpg"'
+});
+ 
 
         res.send(outputBuffer);
 
@@ -588,10 +589,10 @@ app.post('/api/overlay-base64', async (req, res) => {
             // Return as binary
             const actualFormat = getSharpFormat(finalFormat, metadata);
             res.set({
-                'Content-Type': `image/${actualFormat}`,
-                'Content-Length': outputBuffer.length,
-                'Content-Disposition': `attachment; filename="image-with-overlay.${actualFormat}"`
-            });
+  'Content-Type': 'image/jpeg',
+  'Content-Length': outputBuffer.length,
+  'Content-Disposition': 'attachment; filename="image-with-overlay.jpg"'
+});
             res.send(outputBuffer);
         }
 
