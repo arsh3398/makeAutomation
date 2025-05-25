@@ -577,8 +577,8 @@ app.post('/api/overlay-base64', async (req, res) => {
 
         if (returnBase64) {
             // Return as base64 string
-            const actualFormat = getSharpFormat(finalFormat, metadata);
-            const outputBase64 = `data:image/${actualFormat};base64,${outputBuffer.toString('base64')}`;
+           const outputBase64 = `data:image/jpeg;base64,${outputBuffer.toString('base64')}`;
+
             res.json({ 
                 success: true,
                 imageBase64: outputBase64,
