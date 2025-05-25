@@ -79,103 +79,187 @@ function detectImageFormat(buffer) {
     return null; // Unknown format, let Sharp auto-detect
 }
 
-// Helper function to estimate text width (more accurate approximation)
-function estimateTextWidth(text, fontSize, fontFamily = 'Arial') {
+// Improved text width estimation with better font metrics
+function estimateTextWidth(text, fontSize, fontFamily = 'Arial', fontWeight = 'normal') {
     // More accurate character width multipliers for common fonts
-    const fontMultipliers = {
-        'Arial': 0.52,
-        'Helvetica': 0.52,
-        'Times': 0.48,
-        'Georgia': 0.51,
-        'Courier': 0.6,
-        'Verdana': 0.58,
-        'Impact': 0.45,
-        'Comic Sans MS': 0.55,
-        'Roboto': 0.51,
-        'Open Sans': 0.50
+    const fontMetrics = {
+        'Arial': { normal: 0.52, bold: 0.58 },
+        'Helvetica': { normal: 0.52, bold: 0.58 },
+        'Times': { normal: 0.48, bold: 0.54 },
+        'Times New Roman': { normal: 0.48, bold: 0.54 },
+        'Georgia': { normal: 0.51, bold: 0.57 },
+        'Courier': { normal: 0.6, bold: 0.6 },
+        'Courier New': { normal: 0.6, bold: 0.6 },
+        'Verdana': { normal: 0.58, bold: 0.64 },
+        'Impact': { normal: 0.48, bold: 0.48 },
+        'Comic Sans MS': { normal: 0.55, bold: 0.61 }
     };
     
-    const multiplier = fontMultipliers[fontFamily] || 0.52;
+    const metrics = fontMetrics[fontFamily] || { normal: 0.52, bold: 0.58 };
+    const weightMultiplier = fontWeight === 'bold' ? metrics.bold : metrics.normal;
     
-    // Account for different character widths
-    let adjustedLength = 0;
-    for (let char of text) {
-        if (char === ' ') adjustedLength += 0.3;
-        else if ('iIl1'.includes(char)) adjustedLength += 0.4;
-        else if ('mwMW'.includes(char)) adjustedLength += 1.2;
-        else if ('fjtJ'.includes(char)) adjustedLength += 0.5;
-        else adjustedLength += 1;
+    // Account for character variations
+    let totalWidth = 0;
+    for (const char of text) {
+        let charMultiplier = weightMultiplier;
+        
+        // Adjust for specific characters
+        if ('iIl1'.includes(char)) charMultiplier *= 0.4;
+        else if ('fjtJ'.includes(char)) charMultiplier *= 0.5;
+        else if ('rF'.includes(char)) charMultiplier *= 0.65;
+        else if ('mwMW'.includes(char)) charMultiplier *= 1.5;
+        else if (' '.includes(char)) charMultiplier *= 0.3;
+        else if ('.,;:!|'.includes(char)) charMultiplier *= 0.35;
+        
+        totalWidth += fontSize * charMultiplier;
     }
     
-    return adjustedLength * fontSize * multiplier;
+    return totalWidth;
 }
 
-// Helper function to wrap text to fit within image width
-function wrapText(text, maxWidth, fontSize, fontFamily = 'Arial') {
-    const words = text.split(' ');
-    const lines = [];
-    let currentLine = '';
-
-    for (const word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        const testWidth = estimateTextWidth(testLine, fontSize, fontFamily);
+// Improved text wrapping with better word breaking
+function wrapText(text, maxWidth, fontSize, fontFamily = 'Arial', fontWeight = 'normal') {
+    // Handle explicit line breaks first
+    const paragraphs = text.split('\n');
+    const allLines = [];
+    
+    for (const paragraph of paragraphs) {
+        if (!paragraph.trim()) {
+            allLines.push(''); // Preserve empty lines
+            continue;
+        }
         
-        if (testWidth <= maxWidth) {
-            currentLine = testLine;
-        } else {
-            if (currentLine) {
-                lines.push(currentLine);
-                currentLine = word;
+        const words = paragraph.split(/\s+/);
+        const lines = [];
+        let currentLine = '';
+
+        for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const testWidth = estimateTextWidth(testLine, fontSize, fontFamily, fontWeight);
+            
+            if (testWidth <= maxWidth) {
+                currentLine = testLine;
             } else {
-                // Single word is too long, break it up
-                const chars = word.split('');
-                let charLine = '';
-                for (const char of chars) {
-                    const testCharLine = charLine + char;
-                    if (estimateTextWidth(testCharLine, fontSize, fontFamily) <= maxWidth) {
-                        charLine = testCharLine;
-                    } else {
-                        if (charLine) lines.push(charLine);
-                        charLine = char;
+                if (currentLine) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                    
+                    // Check if single word is still too long
+                    if (estimateTextWidth(word, fontSize, fontFamily, fontWeight) > maxWidth) {
+                        // Break long word with hyphen
+                        const brokenWords = breakLongWord(word, maxWidth, fontSize, fontFamily, fontWeight);
+                        if (brokenWords.length > 1) {
+                            lines.push(brokenWords[0]);
+                            currentLine = brokenWords.slice(1).join(' ');
+                        } else {
+                            currentLine = word; // Keep as is if can't break
+                        }
                     }
+                } else {
+                    // Single word is too long, try to break it
+                    const brokenWords = breakLongWord(word, maxWidth, fontSize, fontFamily, fontWeight);
+                    lines.push(...brokenWords.slice(0, -1));
+                    currentLine = brokenWords[brokenWords.length - 1];
                 }
-                if (charLine) currentLine = charLine;
+            }
+        }
+        
+        if (currentLine) {
+            lines.push(currentLine);
+        }
+        
+        allLines.push(...lines);
+    }
+    
+    return allLines;
+}
+
+// Helper function to break long words intelligently
+function breakLongWord(word, maxWidth, fontSize, fontFamily, fontWeight) {
+    const wordWidth = estimateTextWidth(word, fontSize, fontFamily, fontWeight);
+    if (wordWidth <= maxWidth) return [word];
+    
+    const parts = [];
+    let currentPart = '';
+    
+    for (let i = 0; i < word.length; i++) {
+        const char = word[i];
+        const testPart = currentPart + char;
+        const testWidth = estimateTextWidth(testPart + '-', fontSize, fontFamily, fontWeight);
+        
+        if (testWidth <= maxWidth && i < word.length - 1) {
+            currentPart = testPart;
+        } else {
+            if (currentPart) {
+                parts.push(currentPart + '-');
+                currentPart = char;
+            } else {
+                // Even single character is too wide, just add it
+                parts.push(char);
+                currentPart = '';
             }
         }
     }
     
-    if (currentLine) {
-        lines.push(currentLine);
+    if (currentPart) {
+        parts.push(currentPart);
     }
     
-    return lines;
+    return parts;
 }
 
-// Helper function to auto-adjust font size to fit text within image
-function calculateOptimalFontSize(text, imageWidth, imageHeight, maxFontSize = 100, minFontSize = 12) {
-    const maxTextWidth = imageWidth * 0.9; // 90% of image width for padding
-    const maxTextHeight = imageHeight * 0.8; // 80% of image height for padding
+// Enhanced function to calculate optimal font size with better constraints
+function calculateOptimalFontSize(text, imageWidth, imageHeight, options = {}) {
+    const {
+        maxFontSize = Math.min(imageWidth, imageHeight) * 0.15, // More reasonable max based on image size
+        minFontSize = Math.max(12, Math.min(imageWidth, imageHeight) * 0.02), // Scale min with image
+        fontFamily = 'Arial',
+        fontWeight = 'normal',
+        paddingPercent = 10, // Padding as percentage
+        lineHeightMultiplier = 1.3,
+        maxLines = 10 // Prevent too many lines
+    } = options;
     
-    for (let fontSize = maxFontSize; fontSize >= minFontSize; fontSize -= 2) {
-        const wrappedLines = wrapText(text, maxTextWidth, fontSize);
-        const lineHeight = fontSize * 1.2;
+    const padding = Math.min(imageWidth, imageHeight) * (paddingPercent / 100);
+    const maxTextWidth = imageWidth - (padding * 2);
+    const maxTextHeight = imageHeight - (padding * 2);
+    
+    // Binary search for optimal font size
+    let low = minFontSize;
+    let high = maxFontSize;
+    let bestResult = null;
+    
+    while (high - low > 1) {
+        const fontSize = Math.round((low + high) / 2);
+        const lineHeight = fontSize * lineHeightMultiplier;
+        const wrappedLines = wrapText(text, maxTextWidth, fontSize, fontFamily, fontWeight);
         const totalTextHeight = wrappedLines.length * lineHeight;
         
-        if (totalTextHeight <= maxTextHeight) {
-            return { fontSize, wrappedLines };
+        if (totalTextHeight <= maxTextHeight && wrappedLines.length <= maxLines) {
+            bestResult = { fontSize, wrappedLines, lineHeight };
+            low = fontSize;
+        } else {
+            high = fontSize - 1;
         }
     }
     
-    // If we can't fit even with minimum font size, use minimum and wrap anyway
-    const wrappedLines = wrapText(text, maxTextWidth, minFontSize);
-    return { fontSize: minFontSize, wrappedLines };
+    // If binary search didn't find a result, try the minimum
+    if (!bestResult) {
+        const fontSize = minFontSize;
+        const lineHeight = fontSize * lineHeightMultiplier;
+        const wrappedLines = wrapText(text, maxTextWidth, fontSize, fontFamily, fontWeight);
+        bestResult = { fontSize, wrappedLines, lineHeight };
+    }
+    
+    return bestResult;
 }
 
-// Helper function to create SVG text overlay with auto-wrapping
+// Enhanced SVG text creation with better positioning and styling
 function createTextSVG(text, options = {}) {
     const {
-        fontSize = '10',
+        fontSize = 32,
         fontFamily = 'Arial',
+        fontWeight = 'normal',
         color = '#ffffff',
         textAlign = 'center',
         positionX = 50,
@@ -184,47 +268,97 @@ function createTextSVG(text, options = {}) {
         imageHeight = 600,
         autoResize = true,
         maxFontSize = 100,
-        minFontSize = 12
+        minFontSize = 12,
+        paddingPercent = 10,
+        lineHeightMultiplier = 1.3,
+        shadowEnabled = true,
+        shadowColor = 'rgba(0,0,0,0.7)',
+        shadowBlur = 4,
+        shadowOffset = 2,
+        strokeEnabled = false,
+        strokeColor = '#000000',
+        strokeWidth = 1
     } = options;
-
-    const x = (imageWidth * positionX) / 100;
-    const y = (imageHeight * positionY) / 100;
-    
-    let anchor = 'middle';
-    if (textAlign === 'left') anchor = 'start';
-    if (textAlign === 'right') anchor = 'end';
 
     let finalFontSize = fontSize;
     let lines = [];
+    let lineHeight = fontSize * lineHeightMultiplier;
 
     if (autoResize) {
         // Auto-calculate font size and wrap text
-        const result = calculateOptimalFontSize(text, imageWidth, imageHeight, maxFontSize, minFontSize);
+        const result = calculateOptimalFontSize(text, imageWidth, imageHeight, {
+            maxFontSize,
+            minFontSize,
+            fontFamily,
+            fontWeight,
+            paddingPercent,
+            lineHeightMultiplier
+        });
         finalFontSize = result.fontSize;
         lines = result.wrappedLines;
+        lineHeight = result.lineHeight;
     } else {
         // Manual wrapping with specified font size
-        const maxWidth = imageWidth * 0.9;
-        lines = text.includes('\n') ? 
-            text.split('\n').flatMap(line => wrapText(line, maxWidth, fontSize, fontFamily)) :
-            wrapText(text, maxWidth, fontSize, fontFamily);
+        const padding = Math.min(imageWidth, imageHeight) * (paddingPercent / 100);
+        const maxWidth = imageWidth - (padding * 2);
+        lines = wrapText(text, maxWidth, fontSize, fontFamily, fontWeight);
+        lineHeight = fontSize * lineHeightMultiplier;
     }
 
-    const lineHeight = finalFontSize * 1.2;
+    // Calculate text positioning
     const totalTextHeight = lines.length * lineHeight;
-    const startY = y - (totalTextHeight / 2) + (lineHeight / 2);
+    let x, y, anchor;
+    
+    // Handle horizontal alignment
+    switch (textAlign) {
+        case 'left':
+            anchor = 'start';
+            x = imageWidth * (paddingPercent / 100);
+            break;
+        case 'right':
+            anchor = 'end';
+            x = imageWidth - (imageWidth * (paddingPercent / 100));
+            break;
+        default: // center
+            anchor = 'middle';
+            x = (imageWidth * positionX) / 100;
+    }
+    
+    // Handle vertical positioning
+    if (positionY <= 25) {
+        // Top alignment
+        y = (imageHeight * (paddingPercent / 100)) + lineHeight;
+    } else if (positionY >= 75) {
+        // Bottom alignment
+        y = imageHeight - (imageHeight * (paddingPercent / 100)) - totalTextHeight + lineHeight;
+    } else {
+        // Center alignment
+        y = ((imageHeight * positionY) / 100) - (totalTextHeight / 2) + lineHeight;
+    }
 
-    const textElements = lines.map((line, index) => 
-        `<text x="${x}" y="${startY + (index * lineHeight)}" 
-               font-family="${fontFamily}" 
-               font-size="${finalFontSize}" 
-               fill="${color}" 
-               text-anchor="${anchor}"
-               dominant-baseline="middle"
-               style="filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));">
-            ${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
-        </text>`
-    ).join('');
+    // Create text styling
+    let textStyle = `font-family="${fontFamily}" font-size="${finalFontSize}" font-weight="${fontWeight}" fill="${color}" text-anchor="${anchor}" dominant-baseline="middle"`;
+    
+    if (shadowEnabled) {
+        textStyle += ` style="filter: drop-shadow(${shadowOffset}px ${shadowOffset}px ${shadowBlur}px ${shadowColor});"`;
+    }
+    
+    if (strokeEnabled) {
+        textStyle += ` stroke="${strokeColor}" stroke-width="${strokeWidth}"`;
+    }
+
+    // Generate text elements
+    const textElements = lines.map((line, index) => {
+        const lineY = y + (index * lineHeight);
+        const escapedLine = line
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+            
+        return `<text x="${x}" y="${lineY}" ${textStyle}>${escapedLine}</text>`;
+    }).join('');
 
     return `<svg width="${imageWidth}" height="${imageHeight}" xmlns="http://www.w3.org/2000/svg">
         ${textElements}
@@ -266,14 +400,24 @@ app.post('/api/overlay', upload.single('image'), async (req, res) => {
             text = '',
             fontSize = 32,
             fontFamily = 'Arial',
+            fontWeight = 'normal',
             color = '#ffffff',
             textAlign = 'center',
             positionX = 50,
             positionY = 50,
-            outputFormat = 'auto', // 'auto' means keep original format
-            autoResize = true, // Auto-resize text to fit
+            outputFormat = 'auto',
+            autoResize = true,
             maxFontSize = 100,
-            minFontSize = 12
+            minFontSize = 12,
+            paddingPercent = 10,
+            lineHeightMultiplier = 1.3,
+            shadowEnabled = true,
+            shadowColor = 'rgba(0,0,0,0.7)',
+            shadowBlur = 4,
+            shadowOffset = 2,
+            strokeEnabled = false,
+            strokeColor = '#000000',
+            strokeWidth = 1
         } = req.body;
 
         if (!text) {
@@ -290,10 +434,11 @@ app.post('/api/overlay', upload.single('image'), async (req, res) => {
             finalFormat = metadata.format || detectImageFormat(imageBuffer) || 'png';
         }
 
-        // Create text overlay SVG
+        // Create text overlay SVG with enhanced options
         const textSVG = createTextSVG(text, {
             fontSize: parseInt(fontSize),
             fontFamily,
+            fontWeight,
             color,
             textAlign,
             positionX: parseInt(positionX),
@@ -301,8 +446,17 @@ app.post('/api/overlay', upload.single('image'), async (req, res) => {
             imageWidth: metadata.width,
             imageHeight: metadata.height,
             autoResize: autoResize !== 'false' && autoResize !== false,
-            maxFontSize: parseInt(maxFontSize),
-            minFontSize: parseInt(minFontSize)
+            maxFontSize: parseInt(maxFontSize) || Math.min(metadata.width, metadata.height) * 0.15,
+            minFontSize: parseInt(minFontSize) || Math.max(12, Math.min(metadata.width, metadata.height) * 0.02),
+            paddingPercent: parseInt(paddingPercent),
+            lineHeightMultiplier: parseFloat(lineHeightMultiplier),
+            shadowEnabled: shadowEnabled !== 'false' && shadowEnabled !== false,
+            shadowColor,
+            shadowBlur: parseInt(shadowBlur),
+            shadowOffset: parseInt(shadowOffset),
+            strokeEnabled: strokeEnabled === 'true' || strokeEnabled === true,
+            strokeColor,
+            strokeWidth: parseInt(strokeWidth)
         });
 
         // Composite image with text overlay and apply format
@@ -340,6 +494,7 @@ app.post('/api/overlay-base64', async (req, res) => {
             text = '',
             fontSize = 32,
             fontFamily = 'Arial',
+            fontWeight = 'normal',
             color = '#ffffff',
             textAlign = 'center',
             positionX = 50,
@@ -348,7 +503,16 @@ app.post('/api/overlay-base64', async (req, res) => {
             returnBase64 = false,
             autoResize = true,
             maxFontSize = 100,
-            minFontSize = 12
+            minFontSize = 12,
+            paddingPercent = 10,
+            lineHeightMultiplier = 1.3,
+            shadowEnabled = true,
+            shadowColor = 'rgba(0,0,0,0.7)',
+            shadowBlur = 4,
+            shadowOffset = 2,
+            strokeEnabled = false,
+            strokeColor = '#000000',
+            strokeWidth = 1
         } = req.body;
 
         if (!imageBase64) {
@@ -379,10 +543,11 @@ app.post('/api/overlay-base64', async (req, res) => {
             finalFormat = detectedFormat || metadata.format || detectImageFormat(imageBuffer) || 'png';
         }
 
-        // Create text overlay SVG
+        // Create text overlay SVG with enhanced options
         const textSVG = createTextSVG(text, {
             fontSize: parseInt(fontSize),
             fontFamily,
+            fontWeight,
             color,
             textAlign,
             positionX: parseInt(positionX),
@@ -390,8 +555,17 @@ app.post('/api/overlay-base64', async (req, res) => {
             imageWidth: metadata.width,
             imageHeight: metadata.height,
             autoResize: autoResize !== 'false' && autoResize !== false,
-            maxFontSize: parseInt(maxFontSize),
-            minFontSize: parseInt(minFontSize)
+            maxFontSize: parseInt(maxFontSize) || Math.min(metadata.width, metadata.height) * 0.15,
+            minFontSize: parseInt(minFontSize) || Math.max(12, Math.min(metadata.width, metadata.height) * 0.02),
+            paddingPercent: parseInt(paddingPercent),
+            lineHeightMultiplier: parseFloat(lineHeightMultiplier),
+            shadowEnabled: shadowEnabled !== 'false' && shadowEnabled !== false,
+            shadowColor,
+            shadowBlur: parseInt(shadowBlur),
+            shadowOffset: parseInt(shadowOffset),
+            strokeEnabled: strokeEnabled === 'true' || strokeEnabled === true,
+            strokeColor,
+            strokeWidth: parseInt(strokeWidth)
         });
 
         // Composite image with text overlay
@@ -438,102 +612,85 @@ app.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// API documentation endpoint
+// Enhanced API documentation endpoint
 app.get('/api/docs', (req, res) => {
     res.json({
-        title: 'Image Text Overlay API',
-        version: '1.1.0',
+        title: 'Enhanced Image Text Overlay API',
+        version: '2.0.0',
         supportedFormats: [
             'JPEG/JPG', 'PNG', 'WebP', 'GIF', 'TIFF/TIF', 
             'BMP (output as PNG)', 'AVIF', 'HEIC/HEIF'
         ],
         endpoints: {
             'POST /api/overlay': {
-                description: 'Add text overlay to uploaded image file (supports multiple formats)',
+                description: 'Add text overlay to uploaded image file with enhanced typography',
                 contentType: 'multipart/form-data',
                 parameters: {
-                    image: 'File (required) - Image file to overlay (JPEG, PNG, WebP, GIF, TIFF, BMP, AVIF, HEIC)',
-                    text: 'String (required) - Text to overlay',
-                    fontSize: 'Number (optional, default: 32) - Font size in pixels (ignored if autoResize=true)',
+                    image: 'File (required) - Image file to overlay',
+                    text: 'String (required) - Text to overlay (supports \\n for line breaks)',
+                    fontSize: 'Number (optional, default: 32) - Base font size in pixels',
                     fontFamily: 'String (optional, default: Arial) - Font family',
+                    fontWeight: 'String (optional, default: normal) - Font weight (normal|bold)',
                     color: 'String (optional, default: #ffffff) - Text color in hex',
                     textAlign: 'String (optional, default: center) - Text alignment (left|center|right)',
                     positionX: 'Number (optional, default: 50) - Horizontal position (0-100%)',
                     positionY: 'Number (optional, default: 50) - Vertical position (0-100%)',
-                    outputFormat: 'String (optional, default: auto) - Output format (auto|jpeg|png|webp|gif|tiff|avif|heif)',
+                    outputFormat: 'String (optional, default: auto) - Output format',
                     autoResize: 'Boolean (optional, default: true) - Auto-resize text to fit image',
-                    maxFontSize: 'Number (optional, default: 100) - Maximum font size when auto-resizing',
-                    minFontSize: 'Number (optional, default: 12) - Minimum font size when auto-resizing'
+                    maxFontSize: 'Number (optional, auto-calculated) - Maximum font size',
+                    minFontSize: 'Number (optional, auto-calculated) - Minimum font size',
+                    paddingPercent: 'Number (optional, default: 10) - Padding as percentage of image size',
+                    lineHeightMultiplier: 'Number (optional, default: 1.3) - Line height multiplier',
+                    shadowEnabled: 'Boolean (optional, default: true) - Enable text shadow',
+                    shadowColor: 'String (optional, default: rgba(0,0,0,0.7)) - Shadow color',
+                    shadowBlur: 'Number (optional, default: 4) - Shadow blur radius',
+                    shadowOffset: 'Number (optional, default: 2) - Shadow offset distance',
+                    strokeEnabled: 'Boolean (optional, default: false) - Enable text stroke',
+                    strokeColor: 'String (optional, default: #000000) - Stroke color',
+                    strokeWidth: 'Number (optional, default: 1) - Stroke width'
                 },
                 response: 'Binary image data in specified format'
             },
             'POST /api/overlay-base64': {
-                description: 'Add text overlay to base64 encoded image (supports multiple formats)',
+                description: 'Add text overlay to base64 encoded image with enhanced typography',
                 contentType: 'application/json',
-                parameters: {
-                    imageBase64: 'String (required) - Base64 encoded image (any supported format)',
-                    text: 'String (required) - Text to overlay',
-                    fontSize: 'Number (optional, default: 32) - Font size in pixels (ignored if autoResize=true)',
-                    fontFamily: 'String (optional, default: Arial) - Font family',
-                    color: 'String (optional, default: #ffffff) - Text color in hex',
-                    textAlign: 'String (optional, default: center) - Text alignment (left|center|right)',
-                    positionX: 'Number (optional, default: 50) - Horizontal position (0-100%)',
-                    positionY: 'Number (optional, default: 50) - Vertical position (0-100%)',
-                    outputFormat: 'String (optional, default: auto) - Output format (auto|jpeg|png|webp|gif|tiff|avif|heif)',
-                    returnBase64: 'Boolean (optional, default: false) - Return base64 encoded result',
-                    autoResize: 'Boolean (optional, default: true) - Auto-resize text to fit image',
-                    maxFontSize: 'Number (optional, default: 100) - Maximum font size when auto-resizing',
-                    minFontSize: 'Number (optional, default: 12) - Minimum font size when auto-resizing'
-                },
-                response: 'Binary image data or JSON with base64 string'
+                parameters: '(Same as /api/overlay but with imageBase64 and returnBase64 options)'
             }
         },
+        improvements: [
+            "✅ Dynamic font sizing based on image dimensions",
+            "✅ Improved text wrapping with intelligent word breaking",
+            "✅ Better character width estimation for accurate layout",
+            "✅ Support for explicit line breaks (\\n)",
+            "✅ Smarter positioning (top, center, bottom alignment)",
+            "✅ Enhanced typography options (font weight, shadows, strokes)",
+            "✅ Configurable padding and line height",
+            "✅ Binary search algorithm for optimal font size",
+            "✅ Prevention of text overflow and poor layout"
+        ],
         examples: {
-            curl_file_upload_webp: `curl -X POST http://localhost:3000/api/overlay \\
-  -F "image=@/path/to/image.webp" \\
-  -F "text=Hello World" \\
-  -F "fontSize=48" \\
-  -F "color=#ff0000" \\
-  -F "outputFormat=webp" \\
-  --output result.webp`,
-            curl_long_text_auto_resize: `curl -X POST http://localhost:3000/api/overlay \\
+            improved_auto_sizing: `curl -X POST http://localhost:3000/api/overlay \\
   -F "image=@/path/to/image.jpg" \\
-  -F "text=This is a very long text that would normally get cut off but will now automatically wrap and resize to fit perfectly within the image boundaries" \\
+  -F "text=This long text will automatically size and wrap perfectly within the image boundaries without any overflow issues" \\
   -F "autoResize=true" \\
-  -F "maxFontSize=60" \\
+  -F "paddingPercent=15" \\
   --output result.jpg`,
-            curl_manual_font_no_resize: `curl -X POST http://localhost:3000/api/overlay \\
+            custom_typography: `curl -X POST http://localhost:3000/api/overlay \\
   -F "image=@/path/to/image.jpg" \\
-  -F "text=Custom sized text with wrapping" \\
-  -F "fontSize=24" \\
-  -F "autoResize=false" \\
-  --output result.jpg`,
-            curl_base64_auto_format: `curl -X POST http://localhost:3000/api/overlay-base64 \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "imageBase64": "data:image/webp;base64,UklGR...",
-    "text": "Hello World",
-    "fontSize": 48,
-    "outputFormat": "auto",
-    "returnBase64": true
-  }'`
-        },
-        notes: [
-            "When outputFormat is 'auto', the API preserves the original image format",
-            "BMP files are converted to PNG for output (Sharp limitation)",
-            "HEIC/HEIF support depends on Sharp compilation options",
-            "autoResize=true automatically adjusts font size to fit text within image boundaries",
-            "Text is automatically wrapped to fit within 90% of image width",
-            "Long words are broken if they exceed the available width",
-            "All formats support the same text overlay and wrapping features"
-        ]
+  -F "text=BOLD HEADLINE" \\
+  -F "fontWeight=bold" \\
+  -F "shadowEnabled=true" \\
+  -F "strokeEnabled=true" \\
+  -F "strokeColor=#000000" \\
+  --output result.jpg`
+        }
     });
 });
 
 app.listen(port, () => {
-    console.log(`Image Overlay API running on port ${port}`);
+    console.log(`Enhanced Image Overlay API running on port ${port}`);
     console.log(`API Documentation: http://localhost:${port}/api/docs`);
-    console.log('Supported formats: JPEG, PNG, WebP, GIF, TIFF, BMP, AVIF, HEIC/HEIF');
+    console.log('✨ New features: Enhanced typography, smart sizing, better text layout');
 });
 
 module.exports = app;
