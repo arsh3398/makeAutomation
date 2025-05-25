@@ -540,7 +540,7 @@ app.post('/api/overlay-base64', async (req, res) => {
         // Determine output format
         let finalFormat = outputFormat;
         if (outputFormat === 'auto') {
-            finalFormat = detectedFormat || metadata.format || detectImageFormat(imageBuffer) || 'png';
+            finalFormat = detectedFormat || metadata.format || detectImageFormat(imageBuffer) || 'jpg';
         }
 
         // Create text overlay SVG with enhanced options
