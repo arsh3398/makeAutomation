@@ -431,7 +431,7 @@ app.post('/api/overlay', upload.single('image'), async (req, res) => {
         // Determine output format
         let finalFormat = outputFormat;
         if (outputFormat === 'auto') {
-            finalFormat = metadata.format || detectImageFormat(imageBuffer) || 'png';
+            finalFormat = metadata.format || detectImageFormat(imageBuffer) || 'jpg';
         }
 
         // Create text overlay SVG with enhanced options
