@@ -174,7 +174,7 @@ function calculateOptimalFontSize(text, imageWidth, imageHeight, maxFontSize = 1
 // Helper function to create SVG text overlay with auto-wrapping
 function createTextSVG(text, options = {}) {
     const {
-        fontSize = ,
+        fontSize = '10',
         fontFamily = 'Arial',
         color = '#ffffff',
         textAlign = 'center',
